@@ -7,6 +7,8 @@ import com.ibm.mq.jms.MQQueueConnection;
 import com.ibm.mq.jms.MQQueueConnectionFactory;
 import com.ibm.mq.jms.MQQueueReceiver;
 import com.ibm.mq.jms.MQQueueSession;
+import com.sun.net.ssl.HttpsURLConnection;
+import com.sun.xml.internal.messaging.saaj.util.Base64;
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.FileInputStream;
@@ -65,8 +67,11 @@ public class IBM_WMQ_Messeage_Getter {
     private static String JDBC_CONNECT_STRING;
     private static String JDBC_DB_USER;
     private static String JDBC_DB_PASSWORD;
-    private static int SLEEP_MILISECOND_IF_NOT_FOUND_NEW_MQ_MESSAGE;
     private static String API_URL;
+    private static String API_USER;
+    private static String API_PASSWORD;
+    private static String API_MAIL_TEMPLATE_NAME;
+    private static int SLEEP_MILISECOND_IF_NOT_FOUND_NEW_MQ_MESSAGE;
     private static boolean isMQConnected = false;
     private static boolean isDBConnected = false;
     private static int try_number_not_found_new_mq_message = 0;
@@ -216,6 +221,14 @@ public class IBM_WMQ_Messeage_Getter {
         System.out.println("jdbc_user = " + JDBC_DB_USER);
         JDBC_DB_PASSWORD = prop.getProperty("jdbc_password");
         System.out.println("jdbc_password = " + JDBC_DB_PASSWORD);
+        API_URL = prop.getProperty("api_url");
+        System.out.println("api_url = " + API_URL);
+        API_USER = prop.getProperty("api_user");
+        System.out.println("api_user = " + API_URL);
+        API_PASSWORD = prop.getProperty("api_password");
+        System.out.println("api_password = " + API_PASSWORD);
+        API_MAIL_TEMPLATE_NAME = prop.getProperty("api_mail_template_name");
+        System.out.println("api_mail_template_name = " + API_MAIL_TEMPLATE_NAME);
         try {
             SLEEP_MILISECOND_IF_NOT_FOUND_NEW_MQ_MESSAGE = Integer.parseInt(prop.getProperty("sleep_miliseconds_if_not_found_any_new_mq_message"));
             System.out.println("sleep_miliseconds_if_not_found_any_new_file = " + SLEEP_MILISECOND_IF_NOT_FOUND_NEW_MQ_MESSAGE);
@@ -223,8 +236,6 @@ public class IBM_WMQ_Messeage_Getter {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
             System.out.println("Sleep time(miliseconds) must be integer");
         }
-        API_URL = prop.getProperty("api_url");
-        System.out.println("api_url = " + API_URL);
         System.out.println("Done loading Configuration");
     }
 
@@ -288,7 +299,7 @@ public class IBM_WMQ_Messeage_Getter {
                 );
 
                 // condition 4
-                String message_key_cond_4 = (message_key.length() >= 8) ? message_key.substring(3,8) : message_key;
+                String message_key_cond_4 = (message_key.length() >= 8) ? message_key.substring(3, 8) : message_key;
                 error_flag = checkCondition(
                         error_flag,
                         ERROR_FLAG_CONDITION_4,
@@ -312,8 +323,8 @@ public class IBM_WMQ_Messeage_Getter {
                 // Call API and update result to DB, 
                 if (error_flag == 0) {
                     System.out.println("Call API");
-                    makeAPICall();
-                    
+                    callSendMailAPI();
+
                     // If it's ok, insert Message to SENDMAILMSG
                     try {
                         statement.execute("INSERT INTO SENDMAILMSG(MQINSERTDATE,SEQNO,INSERTDATE) VALUES ('"
@@ -359,9 +370,9 @@ public class IBM_WMQ_Messeage_Getter {
             return false;
         }
         try {
-            
+
             return statement.execute("UPDATE MQINSMSG SET SENDCKSTATUS=" + error_flag + " WHERE "
-                    + "MQGETDATE = '"+ mq_get_date_time + "' AND "
+                    + "MQGETDATE = '" + mq_get_date_time + "' AND "
                     + "MQINSERTDATE = '" + mq_insert_date + "' AND "
                     + "SEQNO = " + seq_no);
         } catch (SQLException ex) {
@@ -371,29 +382,31 @@ public class IBM_WMQ_Messeage_Getter {
         return false;
     }
 
-    private static void makeAPICall() {
+    private static void callSendMailAPI() {
         try {
-            String url = API_URL;
-            URL obj = new URL(url);
-            HttpURLConnection con = (HttpURLConnection) obj.openConnection();
-            
+            HttpURLConnection con = (HttpURLConnection) new URL(API_URL).openConnection();
+
+            // for user and password authentication
+            String authentication_account = API_USER + ":" + API_PASSWORD;
+            con.setRequestProperty("Authorization", "Basic " + new String(Base64.encode(authentication_account.getBytes())));
+
             //add reuqest header
             con.setRequestMethod("POST");
-            
-            String urlParameters = "sn=hihi&num=12345";
-            
+            String POST_string = "";
+            POST_string += "cmd=send_mail&";
+            POST_string += "name=" + API_MAIL_TEMPLATE_NAME + "&";
+            POST_string += "from=" + "sugiyama@ilovex.co.jp" + "&";
+            POST_string += "to=" + "theanh@ilovex.co.jp";
+
             // Send post request
             con.setDoOutput(true);
             try (DataOutputStream wr = new DataOutputStream(con.getOutputStream())) {
-                wr.writeBytes(urlParameters);
+                wr.writeBytes(POST_string);
                 wr.flush();
             }
-            
-            int responseCode = con.getResponseCode();
-//            System.out.println("\nSending 'POST' request to URL : " + url);
-//            System.out.println("Post parameters : " + urlParameters);
+
+//            int responseCode = con.getResponseCode();
 //            System.out.println("Response Code : " + responseCode);
-            
             StringBuilder response;
             try (BufferedReader in = new BufferedReader(
                     new InputStreamReader(con.getInputStream()))) {
@@ -403,12 +416,14 @@ public class IBM_WMQ_Messeage_Getter {
                     response.append(inputLine);
                 }
             }
-            
-//            System.out.println(response.toString());
+
+            System.out.println(response.toString());
         } catch (MalformedURLException ex) {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
+            System.out.printf("Error - Malformed URL.");
         } catch (IOException ex) {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
+            System.out.printf("Error IO");
         }
     }
 }
