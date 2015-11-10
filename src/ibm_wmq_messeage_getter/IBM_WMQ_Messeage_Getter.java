@@ -7,8 +7,6 @@ import com.ibm.mq.jms.MQQueueConnection;
 import com.ibm.mq.jms.MQQueueConnectionFactory;
 import com.ibm.mq.jms.MQQueueReceiver;
 import com.ibm.mq.jms.MQQueueSession;
-import com.sun.net.ssl.HttpsURLConnection;
-import com.sun.xml.internal.messaging.saaj.util.Base64;
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.FileInputStream;
@@ -31,6 +29,7 @@ import javax.jms.JMSException;
 import javax.jms.Queue;
 import javax.jms.Session;
 import java.util.Date;
+import org.apache.commons.codec.binary.Base64;
 
 /**
  * Automatically check MQ then check DB and call API if it has permission
@@ -328,8 +327,8 @@ public class IBM_WMQ_Messeage_Getter {
                     // If it's ok, insert Message to SENDMAILMSG
                     try {
                         statement.execute("INSERT INTO SENDMAILMSG(MQINSERTDATE,SEQNO,INSERTDATE) VALUES ('"
-                                + mq_insert_date + "','"
-                                + seq_no + "','"
+                                + mq_insert_date + "',"
+                                + seq_no + ",'"
                                 + format_mq_get_date_time.format(new Date())
                                 + "')");
                     } catch (SQLException ex) {
@@ -388,7 +387,7 @@ public class IBM_WMQ_Messeage_Getter {
 
             // for user and password authentication
             String authentication_account = API_USER + ":" + API_PASSWORD;
-            con.setRequestProperty("Authorization", "Basic " + new String(Base64.encode(authentication_account.getBytes())));
+            con.setRequestProperty("Authorization", "Basic " + new String(new Base64().encode(authentication_account.getBytes())));
 
             //add reuqest header
             con.setRequestMethod("POST");
