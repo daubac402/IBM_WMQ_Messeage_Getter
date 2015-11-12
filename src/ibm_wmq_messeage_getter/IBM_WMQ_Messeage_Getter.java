@@ -264,8 +264,8 @@ public class IBM_WMQ_Messeage_Getter {
             // detact receivedMessage; receivedMessage must be in format: Inserted_time,SeqNo,content
             String[] parts = receivedMessage.getText().split(",");
             if (parts.length >= 3) {
-                String mq_insert_date = parts[0];
-                String seq_no = parts[1];
+                String mq_insert_date = parts[0].replaceAll("\"", "");
+                String seq_no = parts[1].replaceAll("\"", "");
                 String message_content = "";
                 for (int i = 2; i < parts.length; i++) {
                     if ("".equals(message_content)) {
