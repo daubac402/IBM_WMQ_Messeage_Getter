@@ -71,9 +71,11 @@ public class IBM_WMQ_Messeage_Getter {
     private static String API_PASSWORD;
     private static String API_MAIL_TEMPLATE_NAME;
     private static int SLEEP_MILISECOND_IF_NOT_FOUND_NEW_MQ_MESSAGE;
+    private static boolean IS_VERBOSE_MODE = false;
     private static boolean isMQConnected = false;
     private static boolean isDBConnected = false;
     private static int try_number_not_found_new_mq_message = 0;
+    private static long startTime;
 
     /**
      * main function
@@ -235,6 +237,8 @@ public class IBM_WMQ_Messeage_Getter {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
             System.out.println("Sleep time(miliseconds) must be integer");
         }
+        IS_VERBOSE_MODE = ("1".equals(prop.getProperty("is_verbose_mode")));
+        System.out.println("is_verbose_mode = " + IS_VERBOSE_MODE);
         System.out.println("Done loading Configuration");
     }
 
@@ -251,7 +255,11 @@ public class IBM_WMQ_Messeage_Getter {
             System.out.println("Can not connect to DB.");
         }
 
+        startTime = System.nanoTime();
         JMSTextMessage receivedMessage = (JMSTextMessage) receiver.receive(500);
+        if (IS_VERBOSE_MODE) {
+            System.out.println("Get Message from MQ cost: " + (System.nanoTime() - startTime));
+        }
         if (receivedMessage != null) {
             // detact receivedMessage; receivedMessage must be in format: Inserted_time,SeqNo,content
             String[] parts = receivedMessage.getText().split(",");
@@ -270,17 +278,6 @@ public class IBM_WMQ_Messeage_Getter {
                 // Marked got message to DB
                 SimpleDateFormat format_mq_get_date_time = new SimpleDateFormat("YYYY/MM/dd HH:mm:ss:SSS");
                 String mq_get_date_time = format_mq_get_date_time.format(new Date());
-                try {
-                    statement.execute("INSERT INTO MQINSMSG(MQGETDATE,MQINSERTDATE,SEQNO,MQMSG) VALUES ('"
-                            + mq_get_date_time + "','"
-                            + mq_insert_date + "','"
-                            + seq_no + "','"
-                            + message_content
-                            + "')");
-                } catch (SQLException ex) {
-                    Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
-                    System.out.println("Can not marked read messeage to DB");
-                }
 
                 // Check conditions
                 int error_flag = 0;
@@ -294,7 +291,8 @@ public class IBM_WMQ_Messeage_Getter {
                         "select Permission from M_CLIENT where CLIENTKEY = 'GGGGGGGGGG' AND mailsyu = '000'",
                         mq_get_date_time,
                         mq_insert_date,
-                        seq_no
+                        seq_no,
+                        message_content
                 );
 
                 // condition 4
@@ -305,7 +303,8 @@ public class IBM_WMQ_Messeage_Getter {
                         "select Permission from M_CLIENTSTORE where CLIENTKEY = 'GGGGGGGGGG' and STOREKEY = '" + message_key_cond_4 + "'",
                         mq_get_date_time,
                         mq_insert_date,
-                        seq_no
+                        seq_no,
+                        message_content
                 );
 
                 // condition 5
@@ -316,27 +315,64 @@ public class IBM_WMQ_Messeage_Getter {
                         "select Permission from M_KAIIN where Kaiinkey = '" + message_key_cond_5 + "'",
                         mq_get_date_time,
                         mq_insert_date,
-                        seq_no
+                        seq_no,
+                        message_content
                 );
 
                 // Call API and update result to DB, 
                 if (error_flag == 0) {
-                    System.out.println("Call API");
+                    if (IS_VERBOSE_MODE) {
+                        System.out.println("Call API");
+                    }
+                    startTime = System.nanoTime();
                     callSendMailAPI();
+                    if (IS_VERBOSE_MODE) {
+                        System.out.println("Call API cost: " + (System.nanoTime() - startTime));
+                    }
+
+                    try {
+                        startTime = System.nanoTime();
+                        statement.execute("INSERT INTO MQINSMSG(MQGETDATE,MQINSERTDATE,SEQNO,MQMSG) VALUES ('"
+                                + mq_get_date_time + "','"
+                                + mq_insert_date + "',"
+                                + seq_no + ",'"
+                                + message_content
+                                + "')");
+                        if (IS_VERBOSE_MODE) {
+                            System.out.println("INSERT INTO MQINSMSG to DB cost: " + (System.nanoTime() - startTime));
+                        }
+                    } catch (SQLException ex) {
+                        Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
+                        System.out.println("Can not log messeage successfully to DB");
+                        System.out.println("INSERT INTO MQINSMSG(MQGETDATE,MQINSERTDATE,SEQNO,MQMSG) VALUES ('"
+                                + mq_get_date_time + "','"
+                                + mq_insert_date + "',"
+                                + seq_no + ",'"
+                                + message_content
+                                + "')");
+                    }
 
                     // If it's ok, insert Message to SENDMAILMSG
                     try {
+                        startTime = System.nanoTime();
                         statement.execute("INSERT INTO SENDMAILMSG(MQINSERTDATE,SEQNO,INSERTDATE) VALUES ('"
                                 + mq_insert_date + "',"
                                 + seq_no + ",'"
                                 + format_mq_get_date_time.format(new Date())
                                 + "')");
+                        if (IS_VERBOSE_MODE) {
+                            System.out.println("INSERT INTO SENDMAILMSG to DB cost: " + (System.nanoTime() - startTime));
+                        }
                     } catch (SQLException ex) {
                         Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
                         System.out.println("Can not marked send messeage successfully to DB");
+                        System.out.println("INSERT INTO SENDMAILMSG(MQINSERTDATE,SEQNO,INSERTDATE) VALUES ('"
+                                + mq_insert_date + "',"
+                                + seq_no + ",'"
+                                + format_mq_get_date_time.format(new Date())
+                                + "')");
                     }
                 }
-
                 process_message++;
             }
         }
@@ -344,13 +380,17 @@ public class IBM_WMQ_Messeage_Getter {
         return process_message;
     }
 
-    private static int checkCondition(int current_error_flag, int error_value, String queryString, String mq_get_date_time, String mq_insert_date, String seq_no) {
+    private static int checkCondition(int current_error_flag, int error_value, String queryString, String mq_get_date_time, String mq_insert_date, String seq_no, String message_content) {
         if (current_error_flag != 0) {
             return current_error_flag;
         }
         int new_error_flag = error_value;
         try {
+            startTime = System.nanoTime();
             ResultSet rs = statement.executeQuery(queryString);
+            if (IS_VERBOSE_MODE) {
+                System.out.println("Check condition " + error_value + " from DB cost: " + (System.nanoTime() - startTime));
+            }
             while (rs.next()) {
                 if ("1".equals(rs.getString("Permission"))) {
                     new_error_flag = 0;
@@ -360,23 +400,37 @@ public class IBM_WMQ_Messeage_Getter {
         } catch (SQLException ex) {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
         }
-        updateSendFlagMessageStatus(new_error_flag, mq_get_date_time, mq_insert_date, seq_no);
+        updateSendFlagMessageStatus(new_error_flag, mq_get_date_time, mq_insert_date, seq_no, message_content);
         return new_error_flag;
     }
 
-    private static boolean updateSendFlagMessageStatus(int error_flag, String mq_get_date_time, String mq_insert_date, String seq_no) {
+    private static boolean updateSendFlagMessageStatus(int error_flag, String mq_get_date_time, String mq_insert_date, String seq_no, String message_content) {
         if (error_flag == 0) {
             return false;
         }
         try {
-
-            return statement.execute("UPDATE MQINSMSG SET SENDCKSTATUS=" + error_flag + " WHERE "
-                    + "MQGETDATE = '" + mq_get_date_time + "' AND "
-                    + "MQINSERTDATE = '" + mq_insert_date + "' AND "
-                    + "SEQNO = " + seq_no);
+            startTime = System.nanoTime();
+            boolean result = statement.execute("INSERT INTO MQINSMSG(MQGETDATE,MQINSERTDATE,SEQNO,MQMSG,SENDCKSTATUS) VALUES ('"
+                    + mq_get_date_time + "','"
+                    + mq_insert_date + "',"
+                    + seq_no + ",'"
+                    + message_content + "',"
+                    + error_flag
+                    + ")");
+            if (IS_VERBOSE_MODE) {
+                System.out.println("INSERT INTO MQINSMSG to DB cost: " + (System.nanoTime() - startTime));
+            }
+            return result;
         } catch (SQLException ex) {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
             System.out.println("Can not update SENDCKSTATUS messeage to DB");
+            System.out.println("INSERT INTO MQINSMSG(MQGETDATE,MQINSERTDATE,SEQNO,MQMSG,SENDCKSTATUS) VALUES ('"
+                    + mq_get_date_time + "','"
+                    + mq_insert_date + "',"
+                    + seq_no + ",'"
+                    + message_content + "',"
+                    + error_flag
+                    + ")");
         }
         return false;
     }
@@ -416,7 +470,9 @@ public class IBM_WMQ_Messeage_Getter {
                 }
             }
 
-            System.out.println(response.toString());
+            if (IS_VERBOSE_MODE) {
+                System.out.println(response.toString());
+            }
         } catch (MalformedURLException ex) {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
             System.out.printf("Error - Malformed URL.");
