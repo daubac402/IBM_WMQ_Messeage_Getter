@@ -1,12 +1,5 @@
 package ibm_wmq_messeage_getter;
 
-import com.ibm.jms.JMSTextMessage;
-import com.ibm.mq.jms.JMSC;
-import com.ibm.mq.jms.MQQueue;
-import com.ibm.mq.jms.MQQueueConnection;
-import com.ibm.mq.jms.MQQueueConnectionFactory;
-import com.ibm.mq.jms.MQQueueReceiver;
-import com.ibm.mq.jms.MQQueueSession;
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.FileInputStream;
@@ -26,13 +19,11 @@ import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.jms.JMSException;
-import javax.jms.Queue;
-import javax.jms.Session;
 import java.util.Date;
 import org.apache.commons.codec.binary.Base64;
 
 /**
- * Automatically check MQ then check DB and call API if it has permission
+ * Automatically check DB then check DB and call API if it has permission
  *
  * @author theanh@ilovex.co.jp
  */
@@ -51,18 +42,11 @@ public class IBM_WMQ_Messeage_Getter {
      * ****************************************************************************
      */
     // GLOBAL VARIABLE ZONE
-    private static MQQueueConnection MQconnection;
-    private static MQQueueSession session;
-    private static MQQueueReceiver receiver;
     private static Statement statement;
     private static Connection DBconnection;
 
-    private static String HOST_NAME;
-    private static int PORT_NUMBER;
-    private static String QUEUE_MANAGER_NAME;
-    private static String QUEUE_NAME;
-    private static String LOGIN_USERNAME;
-    private static String LOGIN_PASSWORD;
+    private static int TOTAL_CLIENT;
+    private static int CLIENT_NO;
     private static String JDBC_CONNECT_STRING;
     private static String JDBC_DB_USER;
     private static String JDBC_DB_PASSWORD;
@@ -72,7 +56,6 @@ public class IBM_WMQ_Messeage_Getter {
     private static String API_MAIL_TEMPLATE_NAME;
     private static int SLEEP_MILISECOND_IF_NOT_FOUND_NEW_MQ_MESSAGE;
     private static boolean IS_VERBOSE_MODE = false;
-    private static boolean isMQConnected = false;
     private static boolean isDBConnected = false;
     private static int try_number_not_found_new_mq_message = 0;
     private static long startTime;
@@ -95,22 +78,19 @@ public class IBM_WMQ_Messeage_Getter {
         try {
             loadConfiguration();
 
-            createMQConnection();
             createDBConnection();
 
             while (true) {
                 int processed_messages = readMessageFromQueue();
                 if (processed_messages == 0) {
-                    System.out.println("Not found new MQ Message in queue, Automatically recheck in " + SLEEP_MILISECOND_IF_NOT_FOUND_NEW_MQ_MESSAGE + " miliseconds.");
+                    System.out.println("Not found new Message in queue, Automatically recheck in " + SLEEP_MILISECOND_IF_NOT_FOUND_NEW_MQ_MESSAGE + " miliseconds.");
                     try_number_not_found_new_mq_message++;
                     if (try_number_not_found_new_mq_message == MAX_NUMBER_TRY_BEFORE_CLOSE_CONNECTION) {
                         closeDBConnection();
-//                        closeMQConnection();
                     }
                     Thread.sleep(SLEEP_MILISECOND_IF_NOT_FOUND_NEW_MQ_MESSAGE);
                 }
             }
-//            closeMQConnection();
 //            closeDBConnection();
         } catch (JMSException | ClassNotFoundException | SQLException ex) {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
@@ -118,47 +98,6 @@ public class IBM_WMQ_Messeage_Getter {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
             System.out.println("Can not read config file");
         }
-    }
-
-    /**
-     * Make connection to IBM MQ
-     *
-     * @throws JMSException
-     */
-    public static void createMQConnection() throws JMSException {
-        if (isMQConnected) {
-            return;
-        }
-        System.out.println("Connecting to MQ");
-        MQQueueConnectionFactory cf = new MQQueueConnectionFactory();
-        cf.setHostName(HOST_NAME);
-        cf.setPort(PORT_NUMBER);
-        cf.setTransportType(JMSC.MQJMS_TP_CLIENT_MQ_TCPIP);
-        cf.setQueueManager(QUEUE_MANAGER_NAME);
-        cf.setChannel("SYSTEM.DEF.SVRCONN");
-        MQconnection = (MQQueueConnection) cf.createQueueConnection(LOGIN_USERNAME, LOGIN_PASSWORD);
-        session = (MQQueueSession) MQconnection.createQueueSession(false, Session.AUTO_ACKNOWLEDGE);
-        MQQueue queue = (MQQueue) session.createQueue(QUEUE_NAME);
-        receiver = (MQQueueReceiver) session.createReceiver((Queue) queue);
-        MQconnection.start();
-        isMQConnected = true;
-        System.out.println("MQ connected");
-    }
-
-    /**
-     * Close connection to IBM MQ
-     *
-     * @throws JMSException
-     */
-    public static void closeMQConnection() throws JMSException {
-        if (!isMQConnected) {
-            return;
-        }
-        receiver.close();
-        session.close();
-        MQconnection.close();
-        isMQConnected = false;
-        System.out.println("MQ connection is closed");
     }
 
     /**
@@ -199,23 +138,20 @@ public class IBM_WMQ_Messeage_Getter {
         Properties prop = new Properties();
         InputStream inputConfigStream = new FileInputStream(CONFIG_FILE);
         prop.load(inputConfigStream);
-        HOST_NAME = prop.getProperty("mq_host_name");
-        System.out.println("mq_host_name = " + HOST_NAME);
         try {
-            PORT_NUMBER = Integer.parseInt(prop.getProperty("mq_port_number"));
-            System.out.println("mq_port_number = " + PORT_NUMBER);
+            TOTAL_CLIENT = Integer.parseInt(prop.getProperty("total_client"));
+            System.out.println("total_client = " + TOTAL_CLIENT);
         } catch (NumberFormatException ex) {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
-            System.out.println("Port number must be integer");
+            System.out.println("Total client must be integer");
         }
-        QUEUE_MANAGER_NAME = prop.getProperty("mq_queue_manager");
-        System.out.println("mq_queue_manager = " + QUEUE_MANAGER_NAME);
-        QUEUE_NAME = prop.getProperty("mq_queue_name");
-        System.out.println("mq_queue_name = " + QUEUE_NAME);
-        LOGIN_USERNAME = prop.getProperty("mq_os_login_user");
-        System.out.println("mq_os_login_user = " + LOGIN_USERNAME);
-        LOGIN_PASSWORD = prop.getProperty("mq_os_login_password");
-        System.out.println("mq_os_login_password = " + LOGIN_PASSWORD);
+        try {
+            CLIENT_NO = Integer.parseInt(prop.getProperty("client_no"));
+            System.out.println("client_no = " + CLIENT_NO);
+        } catch (NumberFormatException ex) {
+            Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
+            System.out.println("Client No. must be integer");
+        }
         JDBC_CONNECT_STRING = prop.getProperty("jdbc_connect_string");
         System.out.println("jdbc_connect_string = " + JDBC_CONNECT_STRING);
         JDBC_DB_USER = prop.getProperty("jdbc_user");
@@ -256,131 +192,97 @@ public class IBM_WMQ_Messeage_Getter {
         }
 
         startTime = System.nanoTime();
-        JMSTextMessage receivedMessage = (JMSTextMessage) receiver.receive(500);
+        MyMessage receivedMessage = getMessage();
         if (IS_VERBOSE_MODE) {
             System.out.println("Get Message from MQ cost: " + (System.nanoTime() - startTime));
         }
         if (receivedMessage != null) {
-            // detact receivedMessage; receivedMessage must be in format: Inserted_time,SeqNo,content
-            String[] parts = receivedMessage.getText().split(",");
-            if (parts.length >= 3) {
-                String mq_insert_date = parts[0].replaceAll("\"", "");
-                String seq_no = parts[1].replaceAll("\"", "");
-                String message_content = "";
-                for (int i = 2; i < parts.length; i++) {
-                    if ("".equals(message_content)) {
-                        message_content = parts[i];
-                    } else {
-                        message_content += "," + parts[i];
-                    }
+
+            // Marked got message to DB
+            SimpleDateFormat format_mq_get_date_time = new SimpleDateFormat("YYYY/MM/dd HH:mm:ss:SSS");
+            String mq_get_date_time = format_mq_get_date_time.format(new Date());
+
+            // Check conditions
+            int error_flag = 0;
+            String message_key = receivedMessage.getKaiInKey();
+
+            // condition 3
+            error_flag = checkCondition(
+                    error_flag,
+                    ERROR_FLAG_CONDITION_3,
+                    "select Permission from M_CLIENT where CLIENTKEY = 'GGGGGGGGGG' AND mailsyu = '000'",
+                    receivedMessage
+            );
+
+            // condition 4
+            String message_key_cond_4 = (message_key.length() >= 8) ? message_key.substring(3, 8) : message_key;
+            error_flag = checkCondition(
+                    error_flag,
+                    ERROR_FLAG_CONDITION_4,
+                    "select Permission from M_CLIENTSTORE where CLIENTKEY = 'GGGGGGGGGG' and STOREKEY = '" + message_key_cond_4 + "'",
+                    receivedMessage
+            );
+
+            // condition 5
+            String message_key_cond_5 = (message_key.length() > 10) ? message_key.substring(message_key.length() - 10) : message_key;
+            error_flag = checkCondition(
+                    error_flag,
+                    ERROR_FLAG_CONDITION_5,
+                    "select Permission from M_KAIIN where Kaiinkey = '" + message_key_cond_5 + "'",
+                    receivedMessage
+            );
+
+            // Call API and update result to DB, 
+            if (error_flag == 0) {
+                if (IS_VERBOSE_MODE) {
+                    System.out.println("Call API");
                 }
-
-                // Marked got message to DB
-                SimpleDateFormat format_mq_get_date_time = new SimpleDateFormat("YYYY/MM/dd HH:mm:ss:SSS");
-                String mq_get_date_time = format_mq_get_date_time.format(new Date());
-
-                // Check conditions
-                int error_flag = 0;
-                String message_key = message_content.split(",")[0];
-                message_key = message_key.replaceAll("\"", "");
-
-                // condition 3
-                error_flag = checkCondition(
-                        error_flag,
-                        ERROR_FLAG_CONDITION_3,
-                        "select Permission from M_CLIENT where CLIENTKEY = 'GGGGGGGGGG' AND mailsyu = '000'",
-                        mq_get_date_time,
-                        mq_insert_date,
-                        seq_no,
-                        message_content
-                );
-
-                // condition 4
-                String message_key_cond_4 = (message_key.length() >= 8) ? message_key.substring(3, 8) : message_key;
-                error_flag = checkCondition(
-                        error_flag,
-                        ERROR_FLAG_CONDITION_4,
-                        "select Permission from M_CLIENTSTORE where CLIENTKEY = 'GGGGGGGGGG' and STOREKEY = '" + message_key_cond_4 + "'",
-                        mq_get_date_time,
-                        mq_insert_date,
-                        seq_no,
-                        message_content
-                );
-
-                // condition 5
-                String message_key_cond_5 = (message_key.length() > 10) ? message_key.substring(message_key.length() - 10) : message_key;
-                error_flag = checkCondition(
-                        error_flag,
-                        ERROR_FLAG_CONDITION_5,
-                        "select Permission from M_KAIIN where Kaiinkey = '" + message_key_cond_5 + "'",
-                        mq_get_date_time,
-                        mq_insert_date,
-                        seq_no,
-                        message_content
-                );
-
-                // Call API and update result to DB, 
-                if (error_flag == 0) {
-                    if (IS_VERBOSE_MODE) {
-                        System.out.println("Call API");
-                    }
+                startTime = System.nanoTime();
+                callSendMailAPI();
+                if (IS_VERBOSE_MODE) {
+                    System.out.println("Call API cost: " + (System.nanoTime() - startTime));
+                }
+                
+                // If it's ok, update SENDSTATUS Message to 999
+                String update_complete_query_string = "UPDATE S_MSGFILE SET SENDSTATUS = '999' WHERE FOLDERNAME = '" + receivedMessage.getFolderName() + "' AND SEQNO = " + receivedMessage.getSeqNo();
+                try {
                     startTime = System.nanoTime();
-                    callSendMailAPI();
+                    statement.execute(update_complete_query_string);
                     if (IS_VERBOSE_MODE) {
-                        System.out.println("Call API cost: " + (System.nanoTime() - startTime));
+                        System.out.println("UPDATE S_MSGFILE to DB cost: " + (System.nanoTime() - startTime));
                     }
-
-                    try {
-                        startTime = System.nanoTime();
-                        statement.execute("INSERT INTO MQINSMSG(MQGETDATE,MQINSERTDATE,SEQNO,MQMSG) VALUES ('"
-                                + mq_get_date_time + "','"
-                                + mq_insert_date + "',"
-                                + seq_no + ",'"
-                                + message_content
-                                + "')");
-                        if (IS_VERBOSE_MODE) {
-                            System.out.println("INSERT INTO MQINSMSG to DB cost: " + (System.nanoTime() - startTime));
-                        }
-                    } catch (SQLException ex) {
-                        Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
-                        System.out.println("Can not log messeage successfully to DB");
-                        System.out.println("INSERT INTO MQINSMSG(MQGETDATE,MQINSERTDATE,SEQNO,MQMSG) VALUES ('"
-                                + mq_get_date_time + "','"
-                                + mq_insert_date + "',"
-                                + seq_no + ",'"
-                                + message_content
-                                + "')");
-                    }
-
-                    // If it's ok, insert Message to SENDMAILMSG
-                    try {
-                        startTime = System.nanoTime();
-                        statement.execute("INSERT INTO SENDMAILMSG(MQINSERTDATE,SEQNO,INSERTDATE) VALUES ('"
-                                + mq_insert_date + "',"
-                                + seq_no + ",'"
-                                + format_mq_get_date_time.format(new Date())
-                                + "')");
-                        if (IS_VERBOSE_MODE) {
-                            System.out.println("INSERT INTO SENDMAILMSG to DB cost: " + (System.nanoTime() - startTime));
-                        }
-                    } catch (SQLException ex) {
-                        Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
-                        System.out.println("Can not marked send messeage successfully to DB");
-                        System.out.println("INSERT INTO SENDMAILMSG(MQINSERTDATE,SEQNO,INSERTDATE) VALUES ('"
-                                + mq_insert_date + "',"
-                                + seq_no + ",'"
-                                + format_mq_get_date_time.format(new Date())
-                                + "')");
-                    }
+                } catch (SQLException ex) {
+                    Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
+                    System.out.println("Can not marked complete messeage successfully to DB");
+                    System.out.println(update_complete_query_string);
                 }
-                process_message++;
+                
+
+                // If it's ok, insert Message to SENDMAILMSG
+                String sendMail_query_string = "INSERT INTO S_SENDMAILMSG(FOLDERNAME,SEQNO,MAILSENDDATE) VALUES ('"
+                            + receivedMessage.getInsertDate() + "',"
+                            + receivedMessage.getSeqNo() + ",'"
+                            + format_mq_get_date_time.format(new Date())
+                            + "')";
+                try {
+                    startTime = System.nanoTime();
+                    statement.execute(sendMail_query_string);
+                    if (IS_VERBOSE_MODE) {
+                        System.out.println("INSERT INTO S_SENDMAILMSG to DB cost: " + (System.nanoTime() - startTime));
+                    }
+                } catch (SQLException ex) {
+                    Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
+                    System.out.println("Can not marked send messeage successfully to DB");
+                    System.out.println(sendMail_query_string);
+                }
             }
+            process_message++;
         }
 
         return process_message;
     }
 
-    private static int checkCondition(int current_error_flag, int error_value, String queryString, String mq_get_date_time, String mq_insert_date, String seq_no, String message_content) {
+    private static int checkCondition(int current_error_flag, int error_value, String queryString, MyMessage message) {
         if (current_error_flag != 0) {
             return current_error_flag;
         }
@@ -400,37 +302,27 @@ public class IBM_WMQ_Messeage_Getter {
         } catch (SQLException ex) {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
         }
-        updateSendFlagMessageStatus(new_error_flag, mq_get_date_time, mq_insert_date, seq_no, message_content);
+        updateSendFlagMessageStatus(new_error_flag, message);
         return new_error_flag;
     }
 
-    private static boolean updateSendFlagMessageStatus(int error_flag, String mq_get_date_time, String mq_insert_date, String seq_no, String message_content) {
+    private static boolean updateSendFlagMessageStatus(int error_flag, MyMessage message) {
         if (error_flag == 0) {
             return false;
         }
+        String query_string = "UPDATE S_MSGFILE SET SENDSTATUS = '" + error_flag
+                + "' WHERE FOLDERNAME = '" + message.getFolderName() + "' AND SEQNO = " + message.getSeqNo();
         try {
             startTime = System.nanoTime();
-            boolean result = statement.execute("INSERT INTO MQINSMSG(MQGETDATE,MQINSERTDATE,SEQNO,MQMSG,SENDCKSTATUS) VALUES ('"
-                    + mq_get_date_time + "','"
-                    + mq_insert_date + "',"
-                    + seq_no + ",'"
-                    + message_content + "',"
-                    + error_flag
-                    + ")");
+            boolean result = statement.execute(query_string);
             if (IS_VERBOSE_MODE) {
-                System.out.println("INSERT INTO MQINSMSG to DB cost: " + (System.nanoTime() - startTime));
+                System.out.println("UPDATE S_MSGFILE to DB cost: " + (System.nanoTime() - startTime));
             }
             return result;
         } catch (SQLException ex) {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
-            System.out.println("Can not update SENDCKSTATUS messeage to DB");
-            System.out.println("INSERT INTO MQINSMSG(MQGETDATE,MQINSERTDATE,SEQNO,MQMSG,SENDCKSTATUS) VALUES ('"
-                    + mq_get_date_time + "','"
-                    + mq_insert_date + "',"
-                    + seq_no + ",'"
-                    + message_content + "',"
-                    + error_flag
-                    + ")");
+            System.out.println("Can not update SENDSTATUS messeage to DB");
+            System.out.println(query_string);
         }
         return false;
     }
@@ -480,5 +372,34 @@ public class IBM_WMQ_Messeage_Getter {
             Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
             System.out.printf("Error IO");
         }
+    }
+
+    private static MyMessage getMessage() {
+        MyMessage msg = null;
+        String queryString = "select * from S_MSGFILE where MOD(SEQNO," + TOTAL_CLIENT + ") = " + CLIENT_NO + " AND ROWNUM <= 1 and NVL(SENDSTATUS,0) = 0";
+        try {
+            ResultSet rs = statement.executeQuery(queryString);
+            while (rs.next()) {
+                msg = new MyMessage(
+                        rs.getString("FOLDERNAME"),
+                        rs.getInt("SEQNO"),
+                        rs.getString("IFFILENAME"),
+                        rs.getString("KAIINKEY"),
+                        rs.getString("ITEM01"),
+                        rs.getString("ITEM02"),
+                        rs.getString("ITEM03"),
+                        rs.getString("INSERTDATE"),
+                        rs.getString("SENDSTATUS"),
+                        rs.getString("UPDATEDATE"),
+                        rs.getString("UPDATEPROGRAM"),
+                        rs.getString("ARGUMENT")
+                );
+                break;
+            }
+        } catch (SQLException ex) {
+            Logger.getLogger(IBM_WMQ_Messeage_Getter.class.getName()).log(Level.SEVERE, null, ex);
+            System.out.println("Can not excute: " + queryString);
+        }
+        return msg;
     }
 }
